@@ -8,7 +8,6 @@ import (
 	isaacnetwork "github.com/ProtoconNet/mitum2/isaac/network"
 	"github.com/ProtoconNet/mitum2/launch"
 	"github.com/ProtoconNet/mitum2/network/quicmemberlist"
-	"github.com/ProtoconNet/mitum2/network/quicstream"
 	"github.com/ProtoconNet/mitum2/util"
 	"github.com/ProtoconNet/mitum2/util/logging"
 )
@@ -105,11 +104,7 @@ func ProcessAPI(ctx context.Context) (context.Context, error) {
 		nt = sv
 	}
 
-	nt = nt.SetNetworkClientFunc(
-		func() (*isaacnetwork.BaseClient, *quicmemberlist.Memberlist, []quicstream.ConnInfo, error) { // nolint:contextcheck
-			return client, memberList, nodeList, nil
-		},
-	)
+	nt.SetNetworkClient(client, memberList, nodeList)
 
 	return context.WithValue(ctx, digest.ContextValueDigestNetwork, nt), nil
 }

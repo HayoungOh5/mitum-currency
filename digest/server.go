@@ -44,8 +44,11 @@ type HTTP2Server struct {
 	keepAliveTimeout time.Duration
 	router           *mux.Router
 	// client           func() (*isaacnetwork.BaseClient, *quicmemberlist.Memberlist, error)
-	client func() (*isaacnetwork.BaseClient, *quicmemberlist.Memberlist, []quicstream.ConnInfo, error)
-	encs   *encoder.Encoders
+	// client func() (*isaacnetwork.BaseClient, *quicmemberlist.Memberlist, []quicstream.ConnInfo, error)
+	baseClient     *isaacnetwork.BaseClient
+	memberList     *quicmemberlist.Memberlist
+	staticNodeList []quicstream.ConnInfo
+	encs           *encoder.Encoders
 }
 
 func NewHTTP2Server(
@@ -275,44 +278,53 @@ func (sv *HTTP2Server) sendOperation(v interface{}) error {
 		return errors.Errorf("expected Operation, not %T", v)
 	}
 
-	client, memberList, nodeList, err := sv.client()
+	sv.RLock()
+	client := sv.baseClient
+	memberList := sv.memberList
+	nodeList := sv.staticNodeList
+	sv.RUnlock()
 
-	switch {
-	case err != nil:
-		return err
+	if client == nil {
+		return errors.New("network client is not initialized")
+	}
 
-	default:
-		var wg sync.WaitGroup
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
-		defer cancel()
+	var wg sync.WaitGroup
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
 
-		connInfo := make(map[string]quicstream.ConnInfo)
+	connInfo := make(map[string]quicstream.ConnInfo)
+
+	if memberList != nil {
 		memberList.Members(func(node quicmemberlist.Member) bool {
 			connInfo[node.ConnInfo().String()] = node.ConnInfo()
 			return true
 		})
-		for _, c := range nodeList {
-			connInfo[c.String()] = c
-		}
-		errCh := make(chan error, len(connInfo))
-		for _, ci := range connInfo {
-			wg.Add(1)
-			go func(node quicstream.ConnInfo) {
-				defer wg.Done()
+	}
 
-				_, err := client.SendOperation(ctx, node, op)
-				if err != nil {
-					errCh <- err
-				}
-			}(ci)
-		}
-		wg.Wait()
-		close(errCh)
+	for _, c := range nodeList {
+		connInfo[c.String()] = c
+	}
 
-		for err := range errCh {
+	errCh := make(chan error, len(connInfo))
+
+	for _, ci := range connInfo {
+		wg.Add(1)
+		go func(node quicstream.ConnInfo) {
+			defer wg.Done()
+			// Reuses an already connected client (handshake omitted)
+			_, err := client.SendOperation(ctx, node, op)
 			if err != nil {
-				return err
+				errCh <- err
 			}
+		}(ci)
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		if err != nil {
+			return err
 		}
 	}
 
@@ -325,8 +337,18 @@ func (sv *HTTP2Server) buildHal(op base.Operation) (Hal, error) {
 	return hal, nil
 }
 
-func (sv *HTTP2Server) SetNetworkClientFunc(f func() (*isaacnetwork.BaseClient, *quicmemberlist.Memberlist, []quicstream.ConnInfo, error)) *HTTP2Server {
-	sv.client = f
+func (sv *HTTP2Server) SetNetworkClient(
+	client *isaacnetwork.BaseClient,
+	memberList *quicmemberlist.Memberlist,
+	nodeList []quicstream.ConnInfo,
+) *HTTP2Server {
+	sv.Lock()
+	defer sv.Unlock()
+
+	sv.baseClient = client
+	sv.memberList = memberList
+	sv.staticNodeList = nodeList
+
 	return sv
 }
 

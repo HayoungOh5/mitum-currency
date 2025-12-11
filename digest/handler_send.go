@@ -11,7 +11,6 @@ import (
 
 	"github.com/ProtoconNet/mitum-currency/v3/common"
 	"github.com/ProtoconNet/mitum2/base"
-	isaacnetwork "github.com/ProtoconNet/mitum2/isaac/network"
 	"github.com/ProtoconNet/mitum2/network/quicmemberlist"
 	"github.com/ProtoconNet/mitum2/network/quicstream"
 	"github.com/pkg/errors"
@@ -68,19 +67,13 @@ func (hd *Handlers) sendOperation(v interface{}) (Hal, error) {
 		return nil, errors.Errorf("expected Operation, not %T", v)
 	}
 
-	connectionPool, memberList, nodeList, err := hd.client()
-	if err != nil {
-		return nil, err
-	}
+	client := hd.baseClient
+	memberList := hd.memberList
+	nodeList := hd.staticNodeList
 
-	client := isaacnetwork.NewBaseClient( //nolint:gomnd //...
-		hd.encs, hd.enc,
-		connectionPool.Dial,
-		connectionPool.CloseAll,
-	)
-	defer func() {
-		_ = client.Close()
-	}()
+	if client == nil {
+		return nil, errors.New("network client is not initialized")
+	}
 
 	var wg sync.WaitGroup
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)

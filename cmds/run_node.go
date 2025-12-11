@@ -11,6 +11,7 @@ import (
 	"github.com/ProtoconNet/mitum-currency/v3/digest"
 	"github.com/ProtoconNet/mitum2/base"
 	"github.com/ProtoconNet/mitum2/isaac"
+	isaacnetwork "github.com/ProtoconNet/mitum2/isaac/network"
 	isaacstates "github.com/ProtoconNet/mitum2/isaac/states"
 	"github.com/ProtoconNet/mitum2/launch"
 	"github.com/ProtoconNet/mitum2/network/quicmemberlist"
@@ -442,32 +443,20 @@ func (cmd *RunCommand) setDigestAPINetworkClient(
 		return nil, err
 	}
 
-	handlers = handlers.SetNetworkClientFunc(
-		func() (*quicstream.ConnectionPool, *quicmemberlist.Memberlist, []quicstream.ConnInfo, error) { // nolint:contextcheck
-			return connectionPool, memberList, []quicstream.ConnInfo{}, nil
-		},
-	)
+	client := isaacnetwork.NewBaseClient(encs, enc, connectionPool.Dial, connectionPool.CloseAll)
 
+	var nodeList []quicstream.ConnInfo
 	var design digest.YamlDigestDesign
+
 	if err := util.LoadFromContext(ctx, digest.ContextValueDigestDesign, &design); err != nil {
-		if errors.Is(err, util.ErrNotFound) {
-			return handlers, nil
+		if !errors.Is(err, util.ErrNotFound) {
+			return nil, err
 		}
-
-		return nil, err
+	} else if !design.Equal(digest.YamlDigestDesign{}) {
+		nodeList = design.ConnInfo
 	}
 
-	if design.Equal(digest.YamlDigestDesign{}) {
-		return handlers, nil
-	}
-
-	//handlers = handlers.SetConnectionPool(connectionPool)
-
-	handlers = handlers.SetNetworkClientFunc(
-		func() (*quicstream.ConnectionPool, *quicmemberlist.Memberlist, []quicstream.ConnInfo, error) { // nolint:contextcheck
-			return connectionPool, memberList, design.ConnInfo, nil
-		},
-	)
+	handlers = handlers.SetNetworkClient(client, memberList, nodeList)
 
 	cmd.log.Debug().Msg("send handler attached")
 

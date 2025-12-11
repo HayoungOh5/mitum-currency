@@ -48,19 +48,13 @@ type nodeMetricResult struct {
 }
 
 func (hd *Handlers) collectNodeMetrics(self bool) ([]nodeMetricResult, error) {
-	connectionPool, memberList, nodeList, err := hd.client()
-	if err != nil {
-		return nil, err
-	}
+	client := hd.baseClient
+	memberList := hd.memberList
+	nodeList := hd.staticNodeList
 
-	client := isaacnetwork.NewBaseClient( //nolint:gomnd //...
-		hd.encs, hd.enc,
-		connectionPool.Dial,
-		connectionPool.CloseAll,
-	)
-	defer func() {
-		_ = client.Close()
-	}()
+	if client == nil {
+		return nil, errors.New("network client is not initialized")
+	}
 
 	connInfo := make(map[string]quicstream.ConnInfo)
 

@@ -10,6 +10,7 @@ import (
 	"github.com/ProtoconNet/mitum-currency/v3/digest/network"
 	"github.com/ProtoconNet/mitum-currency/v3/types"
 	"github.com/ProtoconNet/mitum2/base"
+	isaacnetwork "github.com/ProtoconNet/mitum2/isaac/network"
 	"github.com/ProtoconNet/mitum2/launch"
 	"github.com/ProtoconNet/mitum2/network/quicmemberlist"
 	"github.com/ProtoconNet/mitum2/network/quicstream"
@@ -92,7 +93,9 @@ type Handlers struct {
 	queue            chan RequestWrapper
 	node             quicstream.ConnInfo
 	send             func(interface{}) (base.Operation, error)
-	client           func() (*quicstream.ConnectionPool, *quicmemberlist.Memberlist, []quicstream.ConnInfo, error)
+	baseClient       *isaacnetwork.BaseClient
+	memberList       *quicmemberlist.Memberlist
+	staticNodeList   []quicstream.ConnInfo
 	router           *mux.Router
 	routes           map[ /* path */ string]*mux.Route
 	itemsLimiter     func(string /* request type */) int64
@@ -134,6 +137,9 @@ func NewHandlers(
 		expireNotFilled:  ExpireFilled,
 		expireShortLived: ExpireShortLived,
 		expireLongLived:  ExpireLongLived,
+		baseClient:       nil,
+		memberList:       nil,
+		staticNodeList:   nil,
 	}
 }
 

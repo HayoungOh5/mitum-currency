@@ -49,27 +49,24 @@ type nodeInfoResult struct {
 }
 
 func (hd *Handlers) collectNodeInfo(self bool) ([]nodeInfoResult, error) {
-	connectionPool, memberList, nodeList, err := hd.client()
-	if err != nil {
-		return nil, err
-	}
+	client := hd.baseClient
+	memberList := hd.memberList
+	nodeList := hd.staticNodeList
 
-	client := isaacnetwork.NewBaseClient( //nolint:gomnd //...
-		hd.encs, hd.enc,
-		connectionPool.Dial,
-		connectionPool.CloseAll,
-	)
-	defer func() {
-		_ = client.Close()
-	}()
+	if client == nil {
+		return nil, errors.New("network client is not initialized")
+	}
 
 	connInfo := make(map[string]quicstream.ConnInfo)
 
 	if !self {
-		memberList.Members(func(node quicmemberlist.Member) bool {
-			connInfo[node.ConnInfo().String()] = node.ConnInfo()
-			return true
-		})
+		// memberList가 nil이 아닐 때만 실행 (방어 코드)
+		if memberList != nil {
+			memberList.Members(func(node quicmemberlist.Member) bool {
+				connInfo[node.ConnInfo().String()] = node.ConnInfo()
+				return true
+			})
+		}
 		for _, c := range nodeList {
 			connInfo[c.String()] = c
 		}
