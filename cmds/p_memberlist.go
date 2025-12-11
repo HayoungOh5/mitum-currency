@@ -18,9 +18,19 @@ import (
 	"github.com/ProtoconNet/mitum2/util/encoder"
 	"github.com/ProtoconNet/mitum2/util/logging"
 	"github.com/ProtoconNet/mitum2/util/ps"
+	"github.com/ProtoconNet/mitum2/util/valuehash"
 	"github.com/hashicorp/memberlist"
 	"github.com/pkg/errors"
 )
+
+type dedupCacheWrapper struct {
+	cache util.GCache[string, struct{}]
+}
+
+func (w *dedupCacheWrapper) Exists(key string) bool {
+	_, found := w.cache.Get(key)
+	return found
+}
 
 func PMemberlist(pctx context.Context) (context.Context, error) {
 	e := util.StringError("prepare memberlist")
@@ -31,6 +41,7 @@ func PMemberlist(pctx context.Context) (context.Context, error) {
 	var params *launch.LocalParams
 	var client *isaacnetwork.BaseClient
 	var connectionPool *quicstream.ConnectionPool
+	var oppool *isaacdatabase.TempPool
 
 	if err := util.LoadFromContextOK(pctx,
 		launch.LoggingContextKey, &log,
@@ -39,6 +50,7 @@ func PMemberlist(pctx context.Context) (context.Context, error) {
 		launch.LocalParamsContextKey, &params,
 		launch.QuicstreamClientContextKey, &client,
 		launch.ConnectionPoolContextKey, &connectionPool,
+		launch.PoolDatabaseContextKey, &oppool,
 	); err != nil {
 		return pctx, e.Wrap(err)
 	}
@@ -59,11 +71,16 @@ func PMemberlist(pctx context.Context) (context.Context, error) {
 		return pctx, e.Wrap(err)
 	}
 
+	dedupCache := util.NewLRUGCache[string, struct{}](1 << 15)
+	dedupWrapper := &dedupCacheWrapper{cache: dedupCache}
+
 	args := quicmemberlist.NewMemberlistArgs(encs.JSON(), config)
 	args.ExtraSameMemberLimit = params.Memberlist.ExtraSameMemberLimit
 	args.FetchCallbackBroadcastMessageFunc = quicmemberlist.FetchCallbackBroadcastMessageFunc(
 		launch.HandlerPrefixMemberlistCallbackBroadcastMessage,
 		headerdial,
+		oppool,
+		dedupWrapper,
 	)
 
 	args.PongEnsureBroadcastMessageFunc = quicmemberlist.PongEnsureBroadcastMessageFunc(
@@ -94,6 +111,7 @@ func PMemberlist(pctx context.Context) (context.Context, error) {
 	return util.ContextWithValues(pctx, map[util.ContextKey]interface{}{
 		launch.MemberlistContextKey:          m,
 		launch.EventWhenMemberLeftContextKey: pps,
+		launch.DedupCacheContextKey:          dedupCache,
 		launch.FilterMemberlistNotifyMsgFuncContextKey: quicmemberlist.FilterNotifyMsgFunc(
 			func(interface{}) (bool, error) { return true, nil },
 		),
@@ -176,6 +194,7 @@ func patchMemberlistNotifyMsg(pctx context.Context) (context.Context, error) {
 	var svvotef isaac.SuffrageVoteFunc
 	var filternotifymsg quicmemberlist.FilterNotifyMsgFunc
 	var oppool *isaacdatabase.TempPool
+	var dedupCache util.GCache[string, struct{}]
 
 	if err := util.LoadFromContextOK(pctx,
 		launch.LoggingContextKey, &log,
@@ -186,6 +205,7 @@ func patchMemberlistNotifyMsg(pctx context.Context) (context.Context, error) {
 		launch.SuffrageVotingVoteFuncContextKey, &svvotef,
 		launch.FilterMemberlistNotifyMsgFuncContextKey, &filternotifymsg,
 		launch.PoolDatabaseContextKey, &oppool,
+		launch.DedupCacheContextKey, &dedupCache,
 	); err != nil {
 		return pctx, err
 	}
@@ -224,7 +244,11 @@ func patchMemberlistNotifyMsg(pctx context.Context) (context.Context, error) {
 				return
 			}
 
-			if _, err := ballotbox.Vote(t); err != nil {
+			_, err := ballotbox.Vote(t)
+			if err == nil {
+				id := valuehash.NewSHA256(t.HashBytes()).String()
+				dedupCache.Set(id, struct{}{}, 0)
+			} else {
 				l.Error().Err(err).Interface("ballot", t).Msg("new ballot; failed to vote")
 
 				return
@@ -265,6 +289,8 @@ func patchMemberlistNotifyMsg(pctx context.Context) (context.Context, error) {
 			case err != nil:
 				l.Error().Err(err).Msg("failed to set operation")
 			default:
+				id := t.Hash().String()
+				dedupCache.Set(id, struct{}{}, 0)
 				l.Debug().Bool("set", isset).Msg("set operation")
 			}
 		default:
