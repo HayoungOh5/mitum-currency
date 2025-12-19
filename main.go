@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
-	launchcmd "github.com/ProtoconNet/mitum2/launch/cmd"
 	"os"
 
+	launchcmd "github.com/ProtoconNet/mitum2/launch/cmd"
+
 	"github.com/ProtoconNet/mitum-currency/v3/cmds"
+	"github.com/ProtoconNet/mitum-currency/v3/utils"
 	"github.com/ProtoconNet/mitum2/base"
 	"github.com/ProtoconNet/mitum2/launch"
 	"github.com/ProtoconNet/mitum2/util"
@@ -102,6 +104,14 @@ func main() {
 
 	log.Log().Debug().Interface("flags", os.Args).Msg("flags")
 	log.Log().Debug().Interface("main_process", pss.Verbose()).Msg("processed")
+
+	go func() {
+		// 만약 InitMetrics에 인자가 필요 없다면 ()
+		// 만약 포트 번호 등을 넘겨야 한다면 (CLI.MetricsPort) 등으로 전달
+		if err := utils.InitMetrics(); err != nil {
+			log.Log().Error().Err(err).Msg("failed to initialize metrics server")
+		}
+	}()
 
 	if err := func() error {
 		defer log.Log().Debug().Msg("stopped")

@@ -102,4 +102,6 @@ require (
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )
 
-replace github.com/hashicorp/memberlist => github.com/HayoungOh5/memberlist v0.0.0-20251120091718-913bc68ce0d2 // latest fix-data-race branch
+replace github.com/hashicorp/memberlist => /Users/ohayoung/Projects/memberlist
+
+replace github.com/ProtoconNet/mitum2 => /Users/ohayoung/Projects/mitum2
